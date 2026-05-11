@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>手書きノートアプリ</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+  <style>
+    :root {
+      --primary: #4F46E5;
+      --primary-hover: #4338CA;
+      --bg: #F3F4F6;
+      --text: #1F2937;
+      --border: #E5E7EB;
+      --danger: #EF4444;
+      --danger-hover: #DC2626;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); overflow: hidden; }
+    
+    /* 画面切り替え用のクラス */
+    .view { display: none; height: 100vh; width: 100vw; flex-direction: column; }
+    .view.active { display: flex; }
+
+    /* ヘッダー周り */
+    header { background: white; padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    h1, h2 { font-size: 1.25rem; font-weight: bold; }
+    
+    button { padding: 8px 16px; border: none; border-radius: 6px; background: var(--primary); color: white; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+    button:hover { background: var(--primary-hover); }
+    button.secondary { background: #E5E7EB; color: var(--text); }
+    button.secondary:hover { background: #D1D5DB; }
+    button.danger-outline { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+    button.danger-outline:hover { background: #FEE2E2; }
+    
+    button.icon-btn { padding: 8px 12px; border-radius: 6px; font-size: 0.95rem; display: flex; align-items: center; gap: 4px; }
+    button.icon-btn-small { padding: 6px; border-radius: 4px; background: transparent; color: #6B7280; font-size: 1.1rem; }
+    button.icon-btn-small:hover { background: #F3F4F6; color: var(--text); }
+    button.icon-btn-small.delete:hover { background: #FEE2E2; color: var(--danger); }
+    button.active-tool { background: #D1D5DB; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
+
+    /* リスト画面 */
+    .content { padding: 24px; flex: 1; overflow-y: auto; }
+    .item-list { list-style: none; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+    
+    .item-card { background: white; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; overflow: hidden; }
+    .item-card-content { padding: 16px; flex: 1; cursor: pointer; }
+    .item-card-content:hover { background: #F9FAFB; }
+    .item-title { font-weight: bold; margin-bottom: 4px; font-size: 1.1rem; }
+    .item-meta { font-size: 0.8rem; color: #6B7280; display: flex; align-items: center; gap: 8px; }
+    .item-actions { display: flex; gap: 4px; padding: 0 12px; }
+
+    .badge { font-size: 0.7rem; color: white; background: #9CA3AF; padding: 2px 6px; border-radius: 12px; }
+
+    /* カスタムポップアップ（モーダル） */
+    .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
+    .modal-content { background: white; padding: 24px; border-radius: 12px; width: 90%; max-width: 400px; display: flex; flex-direction: column; gap: 20px; box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
+    .modal-content h3 { font-size: 1.2rem; }
+    .modal-content input { padding: 12px; font-size: 1rem; border: 1px solid var(--border); border-radius: 6px; outline: none; }
+    .modal-content input:focus { border-color: var(--primary); }
+    .modal-actions { display: flex; flex-direction: column; gap: 8px; }
+    .modal-actions .btn-group { display: flex; gap: 8px; }
+    .modal-actions .btn-group button { flex: 1; }
+    .cancel-btn { background: transparent; color: #6B7280; margin-top: 8px; }
+    .cancel-btn:hover { background: #F3F4F6; }
+
+    /* 描画キャンバス画面 */
+    .toolbar { display: flex; gap: 8px; padding: 10px 16px; background: white; border-bottom: 1px solid var(--border); align-items: center; flex-wrap: wrap; z-index: 10; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    .divider { width: 1px; height: 24px; background: #D1D5DB; margin: 0 4px; }
+    
+    .color-picker { display: flex; gap: 6px; align-items: center; }
+    .color-btn { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+    .color-btn.active { border-color: var(--text); transform: scale(1.1); }
+    .color-picker input[type="color"] { padding: 0; border: none; border-radius: 4px; width: 32px; height: 32px; cursor: pointer; }
+
+    /* キャンバス3枚重ね構造 (方眼レイヤーを独立) */
+    #canvas-container { position: relative; flex: 1; background: white; overflow: hidden; touch-action: none; }
+    #grid-canvas, #bg-canvas, #drawing-canvas { 
+      position: absolute; 
+      top: 0; left: 0; 
+      transform-origin: 0 0;
+    }
+    #grid-canvas { z-index: 0; }
+    #bg-canvas { z-index: 1; }
+    #drawing-canvas { z-index: 2; cursor: crosshair; }
+  </style>
+</head>
+<body>
+
+  <input type="file" id="import-file" style="display: none;" accept=".json" onchange="app.handleImport(event)">
+
+  <div id="page-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <h3>新しいページの作成</h3>
+      <input type="text" id="new-page-name" placeholder="ページの名前を入力">
+      
+      <div class="modal-actions">
+        <p style="font-size: 0.9rem; color: #4B5563; margin-bottom: 4px;">背景に方眼（グリッド）を表示しますか？</p>
+        <div class="btn-group">
+          <button onclick="app.submitCreatePage(true)">表示する</button>
+          <button onclick="app.submitCreatePage(false)" class="secondary">表示しない</button>
+        </div>
+        <button onclick="app.closePageModal()" class="cancel-btn">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="home-view" class="view active">
+    <header>
+      <h1>📚 マイノート</h1>
+      <div style="display: flex; gap: 8px;">
+        <button class="secondary icon-btn" onclick="app.importData()" title="全データをインポート（復元）">📥</button>
+        <button class="secondary icon-btn" onclick="app.exportData()" title="全データをエクスポート（バックアップ）">📤</button>
+        <button onclick="app.createNote()">+ 新しいノート</button>
+      </div>
+    </header>
+    <div class="content">
+      <ul id="note-list" class="item-list"></ul>
+    </div>
+  </div>
+
+  <div id="pages-view" class="view">
+    <header>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <button class="secondary" onclick="app.showHome()">← 戻る</button>
+        <h2 id="current-note-title"></h2>
+      </div>
+      <button onclick="app.openPageModal()">+ 新しいページ</button>
+    </header>
+    <div class="content">
+      <ul id="page-list" class="item-list"></ul>
+    </div>
+  </div>
+
+  <div id="canvas-view" class="view">
+    <div class="toolbar">
+      <button class="secondary" onclick="app.closePage()">← 保存して戻る</button>
+      <div class="divider"></div>
+      
+      <button id="tool-pen" class="icon-btn secondary active-tool" onclick="canvasApp.setTool('pen')">✏️ ペン</button>
+      <button id="tool-highlighter" class="icon-btn secondary" onclick="canvasApp.setTool('highlighter')">🖍️ 蛍光ペン</button>
+      <button id="tool-eraser" class="icon-btn secondary" onclick="canvasApp.setTool('eraser')">🧹 消しゴム</button>
+      
+      <button id="tool-hand" class="icon-btn secondary" onclick="canvasApp.setTool('hand')">🖐️ 手</button>
+      <button id="tool-lasso" class="icon-btn secondary" onclick="canvasApp.setTool('lasso')">✂️ 切り取り</button>
+      
+      <button id="reset-view-btn" class="icon-btn secondary" onclick="canvasApp.resetView()" style="display: none; background: #E0E7FF; color: #4338CA;">🔍 100%</button>
+      
+      <div class="divider"></div>
+      
+      <div class="color-picker" id="color-picker">
+        <div class="color-btn active" style="background: #111827" onclick="canvasApp.setColor('#111827', this)"></div>
+        <div class="color-btn" style="background: #EF4444" onclick="canvasApp.setColor('#EF4444', this)"></div>
+        <div class="color-btn" style="background: #3B82F6" onclick="canvasApp.setColor('#3B82F6', this)"></div>
+        <div class="color-btn" style="background: #10B981" onclick="canvasApp.setColor('#10B981', this)"></div>
+        <input type="color" id="custom-color-picker" title="カスタムカラー" value="#111827" oninput="canvasApp.setColor(this.value, this)">
+      </div>
+
+      <div id="eraser-sizes" style="display: none; gap: 6px;">
+        <button class="icon-btn secondary eraser-size-btn" onclick="canvasApp.setEraserSize(10, this)">小</button>
+        <button class="icon-btn secondary eraser-size-btn" onclick="canvasApp.setEraserSize(20, this)">中</button>
+        <button class="icon-btn secondary eraser-size-btn active-tool" onclick="canvasApp.setEraserSize(40, this)">大</button>
+      </div>
+
+      <div class="divider"></div>
+      <button class="icon-btn secondary" onclick="canvasApp.undo()">↩️ 戻る</button>
+      <button class="icon-btn danger-outline" onclick="canvasApp.clearAll()" style="margin-left: auto;">🗑️ 全消去</button>
+    </div>
+    
+    <div id="canvas-container">
+      <canvas id="grid-canvas"></canvas>
+      <canvas id="bg-canvas"></canvas>
+      <canvas id="drawing-canvas"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================
+    // データ管理・UI制御
+    // ==========================================
+    const app = {
+      data: [],
+      currentNoteId: null,
+      currentPageId: null,
+
+      init() {
+        this.loadData();
+        this.renderNotes();
+      },
+
+      loadData() {
+        const saved = localStorage.getItem('notes_data');
+        if (saved) {
+          try {
+            const decompressed = LZString.decompressFromUTF16(saved);
+            this.data = JSON.parse(decompressed);
+          } catch(e) {
+            this.data = [];
+          }
+        }
+      },
+
+      saveData() {
+        const compressed = LZString.compressToUTF16(JSON.stringify(this.data));
+        localStorage.setItem('notes_data', compressed);
+      },
+
+      // ▼ 追加: エクスポート機能
+      exportData() {
+        if (this.data.length === 0) {
+            alert("エクスポートするノートがありません。");
+            return;
+        }
+        const dataStr = JSON.stringify(this.data, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const dateStr = new Date().toISOString().split('T')[0];
+        a.download = `mynotes_backup_${dateStr}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      },
+
+      // ▼ 追加: インポート機能
+      importData() {
+        if (confirm("データをインポートします。\n\n※同じIDのノートは上書きされ、新しいノートは追加されます。\n（現在のデータがすべて消えるわけではありません）\n\nよろしいですか？")) {
+            document.getElementById('import-file').click();
+        }
+      },
+
+      handleImport(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const importedData = JSON.parse(e.target.result);
+                if (Array.isArray(importedData)) {
+                    const importedIds = new Set(importedData.map(n => n.id));
+                    const mergedData = [...importedData];
+                    
+                    // 既存データのうち、インポートデータと被らないものを残す（結合）
+                    for (const note of this.data) {
+                        if (!importedIds.has(note.id)) {
+                            mergedData.push(note);
+                        }
+                    }
+                    
+                    this.data = mergedData;
+                    this.saveData();
+                    this.renderNotes();
+                    alert("データのインポートが完了しました！");
+                } else {
+                    alert("無効なデータ形式です。");
+                }
+            } catch (err) {
+                alert("ファイルの読み込みに失敗しました。対応していないファイルです。");
+            }
+            event.target.value = ""; // 次回も同じファイルを選べるようにリセット
+        };
+        reader.readAsText(file);
+      },
+
+      createNote() {
+        const name = prompt("新しいノートの名前を入力してください:");
+        if (!name || name.trim() === "") return;
+        const note = { id: Date.now().toString(), name: name.trim(), pages: [] };
+        this.data.unshift(note);
+        this.saveData();
+        this.renderNotes();
+      },
+
+      editNote(id) {
+        const note = this.data.find(n => n.id === id);
+        const newName = prompt("ノートの名前を変更:", note.name);
+        if (newName && newName.trim() !== "") {
+          note.name = newName.trim();
+          this.saveData();
+          this.renderNotes();
+        }
+      },
+
+      deleteNote(id) {
+        if (confirm("このノートを削除してもよろしいですか？\n※この操作は取り消せません。")) {
+          this.data = this.data.filter(n => n.id !== id);
+          this.saveData();
+          this.renderNotes();
+        }
+      },
+
+      openPageModal() {
+        document.getElementById('new-page-name').value = '';
+        document.getElementById('page-modal').style.display = 'flex';
+        document.getElementById('new-page-name').focus();
+      },
+
+      closePageModal() {
+        document.getElementById('page-modal').style.display = 'none';
+      },
+
+      submitCreatePage(hasGrid) {
+        const name = document.getElementById('new-page-name').value;
+        if (!name || name.trim() === "") {
+          alert("ページの名前を入力してください。");
+          return;
+        }
+        
+        const note = this.data.find(n => n.id === this.currentNoteId);
+        const page = { id: Date.now().toString(), name: name.trim(), strokes: [], hasGrid: hasGrid };
+        note.pages.unshift(page);
+        this.saveData();
+        this.renderPages();
+        this.closePageModal();
+      },
+
+      editPage(id) {
+        const note = this.data.find(n => n.id === this.currentNoteId);
+        const page = note.pages.find(p => p.id === id);
+        const newName = prompt("ページの名前を変更:", page.name);
+        if (newName && newName.trim() !== "") {
+          page.name = newName.trim();
+          this.saveData();
+          this.renderPages();
+        }
+      },
+
+      deletePage(id) {
+        if (confirm("このページを削除してもよろしいですか？\n※この操作は取り消せません。")) {
+          const note = this.data.find(n => n.id === this.currentNoteId);
+          note.pages = note.pages.filter(p => p.id !== id);
+          this.saveData();
+          this.renderPages();
+        }
+      },
+
+      renderNotes() {
+        const list = document.getElementById('note-list');
+        list.innerHTML = '';
+        this.data.forEach(note => {
+          const li = document.createElement('li');
+          li.className = 'item-card';
+          li.innerHTML = `
+            <div class="item-card-content" onclick="app.showPages('${note.id}')">
+              <div class="item-title">${note.name}</div>
+              <div class="item-meta">📄 ${note.pages.length} ページ</div>
+            </div>
+            <div class="item-actions">
+              <button class="icon-btn-small" onclick="app.editNote('${note.id}')" title="名前を変更">✏️</button>
+              <button class="icon-btn-small delete" onclick="app.deleteNote('${note.id}')" title="削除">🗑️</button>
+            </div>
+          `;
+          list.appendChild(li);
+        });
+      },
+
+      renderPages() {
+        const note = this.data.find(n => n.id === this.currentNoteId);
+        document.getElementById('current-note-title').textContent = `📂 ${note.name}`;
+        const list = document.getElementById('page-list');
+        list.innerHTML = '';
+        note.pages.forEach(page => {
+          const li = document.createElement('li');
+          li.className = 'item-card';
+          const gridBadge = page.hasGrid ? '<span class="badge">方眼</span>' : '';
+          li.innerHTML = `
+            <div class="item-card-content" onclick="app.openPage('${page.id}')">
+              <div class="item-title">${page.name} ${gridBadge}</div>
+              <div class="item-meta">✍️ 線データ: ${page.strokes.length} 件</div>
+            </div>
+            <div class="item-actions">
+              <button class="icon-btn-small" onclick="app.editPage('${page.id}')" title="名前を変更">✏️</button>
+              <button class="icon-btn-small delete" onclick="app.deletePage('${page.id}')" title="削除">🗑️</button>
+            </div>
+          `;
+          list.appendChild(li);
+        });
+      },
+
+      switchView(viewId) {
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        document.getElementById(viewId).classList.add('active');
+      },
+
+      showHome() {
+        this.currentNoteId = null;
+        this.renderNotes();
+        this.switchView('home-view');
+      },
+
+      showPages(noteId) {
+        this.currentNoteId = noteId;
+        this.renderPages();
+        this.switchView('pages-view');
+      },
+
+      openPage(pageId) {
+        this.currentPageId = pageId;
+        const note = this.data.find(n => n.id === this.currentNoteId);
+        const page = note.pages.find(p => p.id === pageId);
+        
+        this.switchView('canvas-view');
+        canvasApp.init(page.strokes, page.hasGrid);
+      },
+
+      closePage() {
+        canvasApp.commitSelection();
+        const note = this.data.find(n => n.id === this.currentNoteId);
+        const page = note.pages.find(p => p.id === this.currentPageId);
+        page.strokes = canvasApp.getStrokes();
+        this.saveData();
+        this.currentPageId = null;
+        this.showPages(this.currentNoteId);
+      }
+    };
+
+    // ==========================================
+    // キャンバス描画制御 (拡大縮小・移動・切り取り・回転・履歴対応)
+    // ==========================================
+    const canvasApp = {
+      container: document.getElementById('canvas-container'),
+      gridCanvas: document.getElementById('grid-canvas'),
+      bgCanvas: document.getElementById('bg-canvas'),
+      drawingCanvas: document.getElementById('drawing-canvas'),
+      gridCtx: null,
+      bgCtx: null,
+      drawingCtx: null,
+      
+      isDrawing: false,
+      tool: 'pen',
+      color: '#111827',
+      eraserSize: 40,
+      strokes: [],
+      currentStroke: null,
+      hasGrid: false,
+      history: [],
+
+      // パン・ズーム用の変数
+      scale: 1,
+      offsetX: 0,
+      offsetY: 0,
+      activePointers: new Map(),
+      isPanning: false,
+      isPinching: false,
+      lastPanX: 0,
+      lastPanY: 0,
+      initialPinchDistance: 0,
+      initialScale: 1,
+      pinchCenter: { x: 0, y: 0 },
+      eventsSetup: false,
+
+      // ハサミ（切り取り）機能用の変数
+      selectionMode: 'none', // 'none', 'drawing', 'selected', 'dragging', 'resizing', 'rotating'
+      lassoPoints: [],
+      selectedStrokes: [],
+      selectionBox: null, // 4つの頂点の配列 [tl, tr, br, bl] に変更
+      dragStartPos: { x: 0, y: 0 },
+      
+      // リサイズ・回転用の状態保持
+      activeResizeIndex: null,
+      initialSelectionBox: null,
+      initialSelectedStrokes: null,
+      rotationCenter: null,
+      startAngle: 0,
+      boxAngle: 0,
+      fixedPoint: null,
+      originalWidth: 0,
+      originalHeight: 0,
+
+      init(savedStrokes, hasGrid) {
+        this.gridCtx = this.gridCanvas.getContext('2d');
+        this.bgCtx = this.bgCanvas.getContext('2d');
+        this.drawingCtx = this.drawingCanvas.getContext('2d');
+        
+        this.hasGrid = hasGrid;
+        this.strokes = savedStrokes ? JSON.parse(JSON.stringify(savedStrokes)) : [];
+        
+        this.scale = 1;
+        this.offsetX = 0;
+        this.offsetY = 0;
+        this.activePointers.clear();
+        this.isPanning = false;
+        this.isPinching = false;
+        
+        this.resetSelectionState();
+        this.history = [];
+        
+        this.resizeCanvas();
+        this.updateTransform();
+        this.redraw();
+        this.saveState();
+
+        if (!this.eventsSetup) {
+            this.handleWheel = (e) => {
+                if (this.tool === 'hand') {
+                    e.preventDefault();
+                    const zoomSensitivity = 0.002;
+                    const delta = e.deltaY * -zoomSensitivity;
+                    let newScale = this.scale * Math.exp(delta);
+                    newScale = Math.max(0.2, Math.min(newScale, 5));
+
+                    const rect = this.container.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+
+                    this.offsetX = mouseX - (mouseX - this.offsetX) * (newScale / this.scale);
+                    this.offsetY = mouseY - (mouseY - this.offsetY) * (newScale / this.scale);
+                    this.scale = newScale;
+                    this.updateTransform();
+                }
+            };
+            this.container.addEventListener('wheel', this.handleWheel, { passive: false });
+            this.eventsSetup = true;
+        }
+
+        this.drawingCanvas.onpointerdown = this.startPosition.bind(this);
+        this.drawingCanvas.onpointermove = this.draw.bind(this);
+        this.drawingCanvas.onpointerup = this.endPosition.bind(this);
+        this.drawingCanvas.onpointercancel = this.endPosition.bind(this);
+      },
+
+      resetSelectionState() {
+        this.selectionMode = 'none';
+        this.selectedStrokes = [];
+        this.lassoPoints = [];
+        this.selectionBox = null;
+        this.activeResizeIndex = null;
+        this.initialSelectionBox = null;
+        this.initialSelectedStrokes = null;
+      },
+
+      saveState() {
+        this.history.push(JSON.stringify(this.strokes));
+        if (this.history.length > 50) {
+            this.history.shift();
+        }
+      },
+
+      resizeCanvas() {
+        const width = 3000;
+        const height = 2000;
+        if (this.drawingCanvas.width !== width) {
+            this.gridCanvas.width = width;
+            this.gridCanvas.height = height;
+            this.bgCanvas.width = width;
+            this.bgCanvas.height = height;
+            this.drawingCanvas.width = width;
+            this.drawingCanvas.height = height;
+        }
+      },
+
+      updateTransform() {
+        const transformStr = `translate(${this.offsetX}px, ${this.offsetY}px) scale(${this.scale})`;
+        this.gridCanvas.style.transform = transformStr;
+        this.bgCanvas.style.transform = transformStr;
+        this.drawingCanvas.style.transform = transformStr;
+      },
+
+      resetView() {
+        this.scale = 1;
+        this.offsetX = 0;
+        this.offsetY = 0;
+        this.updateTransform();
+      },
+
+      setTool(selectedTool) {
+        this.commitSelection();
+
+        this.tool = selectedTool;
+        document.querySelectorAll('#canvas-view .icon-btn').forEach(btn => btn.classList.remove('active-tool'));
+        document.getElementById(`tool-${selectedTool}`).classList.add('active-tool');
+
+        const colorPicker = document.getElementById('color-picker');
+        const eraserSizes = document.getElementById('eraser-sizes');
+        const resetBtn = document.getElementById('reset-view-btn');
+        
+        if (selectedTool === 'eraser') {
+            colorPicker.style.display = 'none';
+            eraserSizes.style.display = 'flex';
+            resetBtn.style.display = 'none';
+            this.drawingCanvas.style.cursor = 'crosshair';
+        } else if (selectedTool === 'hand') {
+            colorPicker.style.display = 'none';
+            eraserSizes.style.display = 'none';
+            resetBtn.style.display = 'block';
+            this.drawingCanvas.style.cursor = 'grab';
+        } else if (selectedTool === 'lasso') {
+            colorPicker.style.display = 'none';
+            eraserSizes.style.display = 'none';
+            resetBtn.style.display = 'none';
+            this.drawingCanvas.style.cursor = 'crosshair';
+            this.selectionMode = 'none';
+        } else {
+            colorPicker.style.display = 'flex';
+            eraserSizes.style.display = 'none';
+            resetBtn.style.display = 'none';
+            this.drawingCanvas.style.cursor = 'crosshair';
+            
+            if (selectedTool === 'highlighter') {
+                this.updatePalette(['#FFFF00', '#10B981', '#EF4444', '#3B82F6']);
+            } else if (selectedTool === 'pen') {
+                this.updatePalette(['#111827', '#EF4444', '#3B82F6', '#10B981']);
+            }
+        }
+      },
+
+      updatePalette(colors) {
+        const btns = document.querySelectorAll('.color-btn');
+        colors.forEach((color, index) => {
+          if (btns[index]) {
+            btns[index].style.background = color;
+            btns[index].onclick = () => this.setColor(color, btns[index]);
+          }
+        });
+        this.setColor(colors[0], btns[0]);
+      },
+
+      setColor(selectedColor, btnElement) {
+        this.color = selectedColor;
+        document.querySelectorAll('.color-btn').forEach(btn => btn.classList.remove('active'));
+        if (btnElement) {
+            btnElement.classList.add('active');
+            if (btnElement.id === 'custom-color-picker') {
+                btnElement.value = selectedColor;
+            } else {
+                document.getElementById('custom-color-picker').value = selectedColor;
+            }
+        }
+        if (this.tool === 'eraser' || this.tool === 'hand' || this.tool === 'lasso') this.setTool('pen');
+      },
+
+      setEraserSize(size, btnElement) {
+        this.eraserSize = size;
+        document.querySelectorAll('.eraser-size-btn').forEach(btn => btn.classList.remove('active-tool'));
+        btnElement.classList.add('active-tool');
+      },
+
+      getCoordinates(e) {
+        const rect = this.drawingCanvas.getBoundingClientRect();
+        return { 
+            x: (e.clientX - rect.left) / this.scale, 
+            y: (e.clientY - rect.top) / this.scale 
+        };
+      },
+
+      getPinchDistance() {
+        const pts = Array.from(this.activePointers.values());
+        const dx = pts[0].clientX - pts[1].clientX;
+        const dy = pts[0].clientY - pts[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+      },
+
+      getPinchCenter() {
+        const pts = Array.from(this.activePointers.values());
+        return {
+            x: (pts[0].clientX + pts[1].clientX) / 2,
+            y: (pts[0].clientY + pts[1].clientY) / 2
+        };
+      },
+
+      commitSelection() {
+        if (this.selectedStrokes.length > 0) {
+            this.strokes = this.strokes.concat(this.selectedStrokes);
+            this.resetSelectionState();
+            this.saveState();
+            this.redraw();
+        }
+      },
+
+      pointInPolygon(point, vs) {
+        let x = point.x, y = point.y;
+        let inside = false;
+        for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+            let xi = vs[i].x, yi = vs[i].y;
+            let xj = vs[j].x, yj = vs[j].y;
+            let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+      },
+
+      calcSelectionBox() {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        this.selectedStrokes.forEach(stroke => {
+            stroke.points.forEach(p => {
+                if (p.x < minX) minX = p.x;
+                if (p.x > maxX) maxX = p.x;
+                if (p.y < minY) minY = p.y;
+                if (p.y > maxY) maxY = p.y;
+            });
+        });
+        const padding = 10;
+        this.selectionBox = [
+            { x: minX - padding, y: minY - padding }, // 0: tl
+            { x: maxX + padding, y: minY - padding }, // 1: tr
+            { x: maxX + padding, y: maxY + padding }, // 2: br
+            { x: minX - padding, y: maxY + padding }  // 3: bl
+        ];
+      },
+
+      getHandleAtPosition(pos) {
+          if (!this.selectionBox) return null;
+          const box = this.selectionBox;
+          const handleSize = 8 / this.scale;
+          const hitRadius = handleSize * 1.5;
+
+          // 回転ハンドルの位置計算
+          const topMidX = (box[0].x + box[1].x) / 2;
+          const topMidY = (box[0].y + box[1].y) / 2;
+          const dx = box[0].x - box[3].x;
+          const dy = box[0].y - box[3].y;
+          const len = Math.sqrt(dx*dx + dy*dy);
+          const handleDist = 30 / this.scale;
+          
+          let rotHX = topMidX, rotHY = topMidY - handleDist;
+          if (len > 0.001) {
+              rotHX = topMidX + (dx / len) * handleDist;
+              rotHY = topMidY + (dy / len) * handleDist;
+          }
+
+          if (Math.hypot(pos.x - rotHX, pos.y - rotHY) < hitRadius * 1.5) {
+              return { type: 'rotate' };
+          }
+
+          // リサイズハンドルの判定
+          for (let i = 0; i < 4; i++) {
+              if (Math.hypot(pos.x - box[i].x, pos.y - box[i].y) < hitRadius) {
+                  return { type: 'resize', index: i };
+              }
+          }
+
+          return null;
+      },
+
+      startPosition(e) {
+        this.drawingCanvas.setPointerCapture(e.pointerId);
+        this.activePointers.set(e.pointerId, e);
+
+        if (this.tool === 'hand') {
+            this.drawingCanvas.style.cursor = 'grabbing';
+            if (this.activePointers.size === 1) {
+                this.isPanning = true;
+                this.lastPanX = e.clientX;
+                this.lastPanY = e.clientY;
+            } else if (this.activePointers.size === 2) {
+                this.isPanning = false;
+                this.isPinching = true;
+                this.initialPinchDistance = this.getPinchDistance();
+                this.initialScale = this.scale;
+                this.pinchCenter = this.getPinchCenter();
+            }
+            return;
+        }
+
+        const pos = this.getCoordinates(e);
+
+        if (this.tool === 'lasso') {
+            if (this.selectionMode === 'selected' && this.selectionBox) {
+                const handle = this.getHandleAtPosition(pos);
+                
+                if (handle) {
+                    this.initialSelectionBox = JSON.parse(JSON.stringify(this.selectionBox));
+                    this.initialSelectedStrokes = JSON.parse(JSON.stringify(this.selectedStrokes));
+                    const box = this.initialSelectionBox;
+
+                    if (handle.type === 'rotate') {
+                        this.selectionMode = 'rotating';
+                        this.dragStartPos = pos;
+                        this.drawingCanvas.style.cursor = 'grabbing';
+                        
+                        this.rotationCenter = {
+                            x: (box[0].x + box[2].x) / 2,
+                            y: (box[0].y + box[2].y) / 2
+                        };
+                        this.startAngle = Math.atan2(pos.y - this.rotationCenter.y, pos.x - this.rotationCenter.x);
+                        return;
+                    } else if (handle.type === 'resize') {
+                        this.selectionMode = 'resizing';
+                        this.activeResizeIndex = handle.index;
+                        
+                        this.boxAngle = Math.atan2(box[1].y - box[0].y, box[1].x - box[0].x);
+                        
+                        const dxW = box[1].x - box[0].x;
+                        const dyW = box[1].y - box[0].y;
+                        this.originalWidth = Math.sqrt(dxW*dxW + dyW*dyW);
+                        
+                        const dxH = box[3].x - box[0].x;
+                        const dyH = box[3].y - box[0].y;
+                        this.originalHeight = Math.sqrt(dxH*dxH + dyH*dyH);
+                        
+                        this.fixedPoint = { ...box[(handle.index + 2) % 4] };
+                        return;
+                    }
+                }
+
+                if (this.pointInPolygon(pos, this.selectionBox)) {
+                    this.selectionMode = 'dragging';
+                    this.dragStartPos = pos;
+                    this.drawingCanvas.style.cursor = 'move';
+                    return;
+                } else {
+                    this.commitSelection();
+                }
+            }
+            
+            this.selectionMode = 'drawing';
+            this.lassoPoints = [pos];
+            this.drawingCanvas.style.cursor = 'crosshair';
+            return;
+        }
+
+        this.commitSelection();
+        this.isDrawing = true;
+        this.currentStroke = {
+          tool: this.tool,
+          color: this.color,
+          points: [pos],
+          lineWidth: (this.tool === 'pen' ? 3 : (this.tool === 'highlighter' ? 20 : this.eraserSize))
+        };
+      },
+
+      draw(e) {
+        if (this.activePointers.has(e.pointerId)) {
+            this.activePointers.set(e.pointerId, e);
+        }
+
+        if (this.tool === 'hand') {
+            if (this.isPinching && this.activePointers.size === 2) {
+                const currentDistance = this.getPinchDistance();
+                const scaleRatio = currentDistance / this.initialPinchDistance;
+                let newScale = this.initialScale * scaleRatio;
+                newScale = Math.max(0.2, Math.min(newScale, 5));
+
+                const currentCenter = this.getPinchCenter();
+                const mouseX = this.pinchCenter.x;
+                const mouseY = this.pinchCenter.y;
+
+                this.offsetX = mouseX - (mouseX - this.offsetX) * (newScale / this.scale);
+                this.offsetY = mouseY - (mouseY - this.offsetY) * (newScale / this.scale);
+                this.offsetX += (currentCenter.x - this.pinchCenter.x);
+                this.offsetY += (currentCenter.y - this.pinchCenter.y);
+
+                this.scale = newScale;
+                this.pinchCenter = currentCenter;
+                this.updateTransform();
+                return;
+            } else if (this.isPanning && this.activePointers.size === 1) {
+                const dx = e.clientX - this.lastPanX;
+                const dy = e.clientY - this.lastPanY;
+                this.offsetX += dx;
+                this.offsetY += dy;
+                this.lastPanX = e.clientX;
+                this.lastPanY = e.clientY;
+                this.updateTransform();
+                return;
+            }
+            return;
+        }
+
+        const pos = this.getCoordinates(e);
+
+        if (this.tool === 'lasso') {
+            if (this.selectionMode === 'selected' && this.selectionBox) {
+                const handle = this.getHandleAtPosition(pos);
+                if (handle) {
+                    if (handle.type === 'rotate') {
+                        this.drawingCanvas.style.cursor = 'grab';
+                    } else {
+                        const cursors = ['nw-resize', 'ne-resize', 'se-resize', 'sw-resize'];
+                        this.drawingCanvas.style.cursor = cursors[handle.index];
+                    }
+                } else if (this.pointInPolygon(pos, this.selectionBox)) {
+                    this.drawingCanvas.style.cursor = 'move';
+                } else {
+                    this.drawingCanvas.style.cursor = 'crosshair';
+                }
+            } else if (this.selectionMode === 'drawing') {
+                this.lassoPoints.push(pos);
+                this.drawingCtx.clearRect(0, 0, this.drawingCanvas.width, this.drawingCanvas.height);
+                this.drawingCtx.beginPath();
+                this.drawingCtx.setLineDash([5, 5]);
+                this.drawingCtx.strokeStyle = '#4B5563';
+                this.drawingCtx.lineWidth = 2;
+                this.drawingCtx.moveTo(this.lassoPoints[0].x, this.lassoPoints[0].y);
+                for(let i = 1; i < this.lassoPoints.length; i++) {
+                    this.drawingCtx.lineTo(this.lassoPoints[i].x, this.lassoPoints[i].y);
+                }
+                this.drawingCtx.stroke();
+                this.drawingCtx.setLineDash([]);
+            } else if (this.selectionMode === 'dragging') {
+                const dx = pos.x - this.dragStartPos.x;
+                const dy = pos.y - this.dragStartPos.y;
+                
+                this.selectedStrokes.forEach(stroke => {
+                    stroke.points.forEach(p => { p.x += dx; p.y += dy; });
+                });
+                this.selectionBox.forEach(pt => { pt.x += dx; pt.y += dy; });
+                
+                this.dragStartPos = pos;
+                this.redraw();
+            } else if (this.selectionMode === 'rotating') {
+                const currentAngle = Math.atan2(pos.y - this.rotationCenter.y, pos.x - this.rotationCenter.x);
+                const deltaAngle = currentAngle - this.startAngle;
+                
+                const cosA = Math.cos(deltaAngle);
+                const sinA = Math.sin(deltaAngle);
+                const cx = this.rotationCenter.x;
+                const cy = this.rotationCenter.y;
+
+                for (let i = 0; i < 4; i++) {
+                    const pt = this.initialSelectionBox[i];
+                    this.selectionBox[i].x = cx + (pt.x - cx) * cosA - (pt.y - cy) * sinA;
+                    this.selectionBox[i].y = cy + (pt.x - cx) * sinA + (pt.y - cy) * cosA;
+                }
+                
+                this.selectedStrokes.forEach((stroke, sIdx) => {
+                    stroke.points.forEach((p, pIdx) => {
+                        const pt = this.initialSelectedStrokes[sIdx].points[pIdx];
+                        p.x = cx + (pt.x - cx) * cosA - (pt.y - cy) * sinA;
+                        p.y = cy + (pt.x - cx) * sinA + (pt.y - cy) * cosA;
+                    });
+                });
+                this.redraw();
+            } else if (this.selectionMode === 'resizing') {
+                const dx = pos.x - this.fixedPoint.x;
+                const dy = pos.y - this.fixedPoint.y;
+
+                const cosM = Math.cos(-this.boxAngle);
+                const sinM = Math.sin(-this.boxAngle);
+                const localX = dx * cosM - dy * sinM;
+                const localY = dx * sinM + dy * cosM;
+
+                let newW = this.originalWidth;
+                let newH = this.originalHeight;
+                const minSize = 20;
+
+                switch(this.activeResizeIndex) {
+                    case 0:
+                        newW = Math.max(minSize, -localX);
+                        newH = Math.max(minSize, -localY);
+                        break;
+                    case 1:
+                        newW = Math.max(minSize, localX);
+                        newH = Math.max(minSize, -localY);
+                        break;
+                    case 2:
+                        newW = Math.max(minSize, localX);
+                        newH = Math.max(minSize, localY);
+                        break;
+                    case 3:
+                        newW = Math.max(minSize, -localX);
+                        newH = Math.max(minSize, localY);
+                        break;
+                }
+
+                const scaleX = newW / this.originalWidth;
+                const scaleY = newH / this.originalHeight;
+
+                const cosP = Math.cos(this.boxAngle);
+                const sinP = Math.sin(this.boxAngle);
+                const fixedX = this.fixedPoint.x;
+                const fixedY = this.fixedPoint.y;
+
+                const applyTransform = (pt) => {
+                    const rdx = pt.x - fixedX;
+                    const rdy = pt.y - fixedY;
+                    const lx = rdx * cosM - rdy * sinM;
+                    const ly = rdx * sinM + rdy * cosM;
+                    const sx = lx * scaleX;
+                    const sy = ly * scaleY;
+                    const wx = sx * cosP - sy * sinP;
+                    const wy = sx * sinP + sy * cosP;
+                    return { x: fixedX + wx, y: fixedY + wy };
+                };
+
+                for(let i=0; i<4; i++) {
+                    const newPt = applyTransform(this.initialSelectionBox[i]);
+                    this.selectionBox[i].x = newPt.x;
+                    this.selectionBox[i].y = newPt.y;
+                }
+
+                this.selectedStrokes.forEach((stroke, sIdx) => {
+                    stroke.points.forEach((p, pIdx) => {
+                        const newPt = applyTransform(this.initialSelectedStrokes[sIdx].points[pIdx]);
+                        p.x = newPt.x;
+                        p.y = newPt.y;
+                    });
+                });
+
+                this.redraw();
+            }
+            return;
+        }
+
+        if (!this.isDrawing) return;
+        this.currentStroke.points.push(pos);
+        
+        const points = this.currentStroke.points;
+        if (points.length < 2) return;
+
+        if (this.tool === 'eraser') {
+            const start = points[points.length - 2];
+            const end = points[points.length - 1];
+            this.applyStyle(this.bgCtx, this.currentStroke);
+            this.bgCtx.beginPath();
+            this.bgCtx.moveTo(start.x, start.y);
+            this.bgCtx.lineTo(end.x, end.y);
+            this.bgCtx.stroke();
+        } else {
+            this.drawingCtx.clearRect(0, 0, this.drawingCanvas.width, this.drawingCanvas.height);
+            this.applyStyle(this.drawingCtx, this.currentStroke);
+            
+            this.drawingCtx.beginPath();
+            this.drawingCtx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                this.drawingCtx.lineTo(points[i].x, points[i].y);
+            }
+            this.drawingCtx.stroke();
+        }
+      },
+
+      endPosition(e) {
+        this.drawingCanvas.releasePointerCapture(e.pointerId);
+        this.activePointers.delete(e.pointerId);
+
+        if (this.tool === 'hand') {
+            if (this.activePointers.size < 2) {
+                this.isPinching = false;
+            }
+            if (this.activePointers.size === 0) {
+                this.isPanning = false;
+                this.drawingCanvas.style.cursor = 'grab';
+            } else if (this.activePointers.size === 1) {
+                const pt = Array.from(this.activePointers.values())[0];
+                this.isPanning = true;
+                this.lastPanX = pt.clientX;
+                this.lastPanY = pt.clientY;
+            }
+            return;
+        }
+
+        if (this.tool === 'lasso') {
+            if (this.selectionMode === 'drawing') {
+                this.drawingCtx.clearRect(0, 0, this.drawingCanvas.width, this.drawingCanvas.height);
+                
+                if (this.lassoPoints.length > 2) {
+                    const newStrokes = [];
+                    const selected = [];
+                    
+                    this.strokes.forEach(stroke => {
+                        const isInside = stroke.points.some(p => this.pointInPolygon(p, this.lassoPoints));
+                        if (isInside) {
+                            selected.push(stroke);
+                        } else {
+                            newStrokes.push(stroke);
+                        }
+                    });
+                    
+                    if (selected.length > 0) {
+                        this.strokes = newStrokes;
+                        this.selectedStrokes = selected;
+                        this.selectionMode = 'selected';
+                        this.calcSelectionBox();
+                    } else {
+                        this.selectionMode = 'none';
+                    }
+                } else {
+                    this.selectionMode = 'none';
+                }
+                this.lassoPoints = [];
+                this.redraw();
+            } else if (this.selectionMode === 'dragging' || this.selectionMode === 'resizing' || this.selectionMode === 'rotating') {
+                this.selectionMode = 'selected';
+                this.drawingCanvas.style.cursor = 'crosshair';
+                this.initialSelectionBox = null;
+                this.initialSelectedStrokes = null;
+            }
+            return;
+        }
+
+        if (!this.isDrawing) return;
+        this.isDrawing = false;
+        if (this.currentStroke && this.currentStroke.points.length > 0) {
+          this.strokes.push(this.currentStroke);
+          this.saveState();
+        }
+        this.currentStroke = null;
+        this.redraw();
+      },
+
+      applyStyle(ctx, stroke) {
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = stroke.lineWidth;
+        
+        if (stroke.tool === 'pen') {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = 1.0;
+          ctx.strokeStyle = stroke.color;
+        } else if (stroke.tool === 'highlighter') {
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.globalAlpha = 0.4;
+          ctx.strokeStyle = stroke.color;
+        } else if (stroke.tool === 'eraser') {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.globalAlpha = 1.0;
+          ctx.strokeStyle = 'rgba(0,0,0,1)';
+        }
+      },
+
+      drawGrid() {
+        const ctx = this.gridCtx;
+        const gridSize = 24;
+        ctx.beginPath();
+        ctx.lineWidth = 0.5;
+        ctx.strokeStyle = '#D1D5DB';
+        ctx.globalAlpha = 1.0;
+        ctx.globalCompositeOperation = 'source-over';
+
+        for (let x = 0; x < ctx.canvas.width; x += gridSize) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, ctx.canvas.height);
+        }
+        for (let y = 0; y < ctx.canvas.height; y += gridSize) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(ctx.canvas.width, y);
+        }
+        ctx.stroke();
+      },
+
+      redraw() {
+        this.gridCtx.clearRect(0, 0, this.gridCanvas.width, this.gridCanvas.height);
+        this.bgCtx.clearRect(0, 0, this.bgCanvas.width, this.bgCanvas.height);
+        this.drawingCtx.clearRect(0, 0, this.drawingCanvas.width, this.drawingCanvas.height);
+        
+        if (this.hasGrid) {
+            this.drawGrid();
+        }
+
+        for (const stroke of this.strokes) {
+          if (stroke.points.length < 2) continue;
+          this.applyStyle(this.bgCtx, stroke);
+          this.bgCtx.beginPath();
+          this.bgCtx.moveTo(stroke.points[0].x, stroke.points[0].y);
+          for (let i = 1; i < stroke.points.length; i++) {
+            this.bgCtx.lineTo(stroke.points[i].x, stroke.points[i].y);
+          }
+          this.bgCtx.stroke();
+        }
+
+        for (const stroke of this.selectedStrokes) {
+          if (stroke.points.length < 2) continue;
+          this.applyStyle(this.bgCtx, stroke);
+          this.bgCtx.beginPath();
+          this.bgCtx.moveTo(stroke.points[0].x, stroke.points[0].y);
+          for (let i = 1; i < stroke.points.length; i++) {
+            this.bgCtx.lineTo(stroke.points[i].x, stroke.points[i].y);
+          }
+          this.bgCtx.stroke();
+        }
+
+        if (this.selectionMode !== 'none' && this.selectionMode !== 'drawing' && this.selectionBox) {
+            const box = this.selectionBox;
+            
+            // 枠の描画
+            this.drawingCtx.beginPath();
+            this.drawingCtx.setLineDash([5, 5]);
+            this.drawingCtx.strokeStyle = '#3B82F6';
+            this.drawingCtx.lineWidth = 2;
+            this.drawingCtx.moveTo(box[0].x, box[0].y);
+            this.drawingCtx.lineTo(box[1].x, box[1].y);
+            this.drawingCtx.lineTo(box[2].x, box[2].y);
+            this.drawingCtx.lineTo(box[3].x, box[3].y);
+            this.drawingCtx.closePath();
+            this.drawingCtx.stroke();
+            this.drawingCtx.setLineDash([]);
+
+            // リサイズハンドル
+            const handleSize = 8 / this.scale;
+            this.drawingCtx.fillStyle = '#3B82F6';
+            box.forEach(pt => {
+                this.drawingCtx.fillRect(
+                    pt.x - handleSize / 2,
+                    pt.y - handleSize / 2,
+                    handleSize,
+                    handleSize
+                );
+            });
+
+            // 回転ハンドル
+            const topMidX = (box[0].x + box[1].x) / 2;
+            const topMidY = (box[0].y + box[1].y) / 2;
+            const dx = box[0].x - box[3].x;
+            const dy = box[0].y - box[3].y;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            const handleDist = 30 / this.scale;
+            
+            let rotHX = topMidX, rotHY = topMidY - handleDist;
+            if (len > 0.001) {
+                rotHX = topMidX + (dx / len) * handleDist;
+                rotHY = topMidY + (dy / len) * handleDist;
+            }
+
+            // 回転ハンドルへの線
+            this.drawingCtx.beginPath();
+            this.drawingCtx.strokeStyle = '#3B82F6';
+            this.drawingCtx.lineWidth = 2;
+            this.drawingCtx.moveTo(topMidX, topMidY);
+            this.drawingCtx.lineTo(rotHX, rotHY);
+            this.drawingCtx.stroke();
+
+            // 回転ハンドルの円
+            this.drawingCtx.beginPath();
+            this.drawingCtx.fillStyle = 'white';
+            this.drawingCtx.arc(rotHX, rotHY, handleSize, 0, Math.PI * 2);
+            this.drawingCtx.fill();
+            this.drawingCtx.stroke();
+        }
+      },
+
+      undo() {
+        if (this.selectionMode !== 'none') {
+            this.resetSelectionState();
+            if (this.history.length > 0) {
+                this.strokes = JSON.parse(this.history[this.history.length - 1]);
+            }
+            this.redraw();
+            return;
+        }
+
+        if (this.history.length > 1) {
+          this.history.pop();
+          this.strokes = JSON.parse(this.history[this.history.length - 1]);
+          this.redraw();
+        }
+      },
+
+      clearAll() {
+        if (confirm("キャンバスに書かれているものをすべて消去しますか？\n※この操作は取り消せません。")) {
+          this.strokes = [];
+          this.resetSelectionState();
+          this.saveState();
+          this.redraw();
+        }
+      },
+
+      getStrokes() {
+        this.commitSelection();
+        return this.strokes;
+      }
+    };
+
+    app.init();
+  </script>
+</body>
+</html>
