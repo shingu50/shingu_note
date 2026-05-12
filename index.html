@@ -33,11 +33,20 @@
     button.danger-outline { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
     button.danger-outline:hover { background: #FEE2E2; }
     
-    button.icon-btn { padding: 8px 12px; border-radius: 6px; font-size: 0.95rem; display: flex; align-items: center; gap: 4px; }
+    /* ▼ 変更: アニメーションを滑らかにするため transition を追加 */
+    button.icon-btn { padding: 8px 12px; border-radius: 6px; font-size: 0.95rem; display: flex; align-items: center; gap: 4px; transition: all 0.2s ease; }
     button.icon-btn-small { padding: 6px; border-radius: 4px; background: transparent; color: #6B7280; font-size: 1.1rem; }
     button.icon-btn-small:hover { background: #F3F4F6; color: var(--text); }
     button.icon-btn-small.delete:hover { background: #FEE2E2; color: var(--danger); }
-    button.active-tool { background: #D1D5DB; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
+    
+    /* ▼ 変更: 選択中のツールをもっと目立たせるデザインに */
+    button.active-tool { 
+      background: var(--primary) !important; /* 青色にする */
+      color: white !important;               /* 文字を白にする */
+      box-shadow: 0 4px 8px rgba(79, 70, 229, 0.4); /* 影をつける */
+      transform: translateY(-2px);           /* 少し上に浮かせる */
+      border: 1px solid var(--primary-hover);
+    }
 
     /* リスト画面 */
     .content { padding: 24px; flex: 1; overflow-y: auto; }
@@ -205,7 +214,6 @@
         localStorage.setItem('notes_data', compressed);
       },
 
-      // ▼ 追加: エクスポート機能
       exportData() {
         if (this.data.length === 0) {
             alert("エクスポートするノートがありません。");
@@ -224,7 +232,6 @@
         URL.revokeObjectURL(url);
       },
 
-      // ▼ 追加: インポート機能
       importData() {
         if (confirm("データをインポートします。\n\n※同じIDのノートは上書きされ、新しいノートは追加されます。\n（現在のデータがすべて消えるわけではありません）\n\nよろしいですか？")) {
             document.getElementById('import-file').click();
@@ -243,7 +250,6 @@
                     const importedIds = new Set(importedData.map(n => n.id));
                     const mergedData = [...importedData];
                     
-                    // 既存データのうち、インポートデータと被らないものを残す（結合）
                     for (const note of this.data) {
                         if (!importedIds.has(note.id)) {
                             mergedData.push(note);
@@ -260,7 +266,7 @@
             } catch (err) {
                 alert("ファイルの読み込みに失敗しました。対応していないファイルです。");
             }
-            event.target.value = ""; // 次回も同じファイルを選べるようにリセット
+            event.target.value = ""; 
         };
         reader.readAsText(file);
       },
@@ -438,7 +444,6 @@
       hasGrid: false,
       history: [],
 
-      // パン・ズーム用の変数
       scale: 1,
       offsetX: 0,
       offsetY: 0,
@@ -452,14 +457,12 @@
       pinchCenter: { x: 0, y: 0 },
       eventsSetup: false,
 
-      // ハサミ（切り取り）機能用の変数
-      selectionMode: 'none', // 'none', 'drawing', 'selected', 'dragging', 'resizing', 'rotating'
+      selectionMode: 'none', 
       lassoPoints: [],
       selectedStrokes: [],
-      selectionBox: null, // 4つの頂点の配列 [tl, tr, br, bl] に変更
+      selectionBox: null, 
       dragStartPos: { x: 0, y: 0 },
       
-      // リサイズ・回転用の状態保持
       activeResizeIndex: null,
       initialSelectionBox: null,
       initialSelectedStrokes: null,
@@ -707,7 +710,6 @@
           const handleSize = 8 / this.scale;
           const hitRadius = handleSize * 1.5;
 
-          // 回転ハンドルの位置計算
           const topMidX = (box[0].x + box[1].x) / 2;
           const topMidY = (box[0].y + box[1].y) / 2;
           const dx = box[0].x - box[3].x;
@@ -725,7 +727,6 @@
               return { type: 'rotate' };
           }
 
-          // リサイズハンドルの判定
           for (let i = 0; i < 4; i++) {
               if (Math.hypot(pos.x - box[i].x, pos.y - box[i].y) < hitRadius) {
                   return { type: 'resize', index: i };
@@ -1165,7 +1166,6 @@
         if (this.selectionMode !== 'none' && this.selectionMode !== 'drawing' && this.selectionBox) {
             const box = this.selectionBox;
             
-            // 枠の描画
             this.drawingCtx.beginPath();
             this.drawingCtx.setLineDash([5, 5]);
             this.drawingCtx.strokeStyle = '#3B82F6';
@@ -1178,7 +1178,6 @@
             this.drawingCtx.stroke();
             this.drawingCtx.setLineDash([]);
 
-            // リサイズハンドル
             const handleSize = 8 / this.scale;
             this.drawingCtx.fillStyle = '#3B82F6';
             box.forEach(pt => {
@@ -1190,7 +1189,6 @@
                 );
             });
 
-            // 回転ハンドル
             const topMidX = (box[0].x + box[1].x) / 2;
             const topMidY = (box[0].y + box[1].y) / 2;
             const dx = box[0].x - box[3].x;
@@ -1204,7 +1202,6 @@
                 rotHY = topMidY + (dy / len) * handleDist;
             }
 
-            // 回転ハンドルへの線
             this.drawingCtx.beginPath();
             this.drawingCtx.strokeStyle = '#3B82F6';
             this.drawingCtx.lineWidth = 2;
@@ -1212,7 +1209,6 @@
             this.drawingCtx.lineTo(rotHX, rotHY);
             this.drawingCtx.stroke();
 
-            // 回転ハンドルの円
             this.drawingCtx.beginPath();
             this.drawingCtx.fillStyle = 'white';
             this.drawingCtx.arc(rotHX, rotHY, handleSize, 0, Math.PI * 2);
